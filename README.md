@@ -82,6 +82,50 @@ You've successfully run and modified your React Native App. :partying_face:
 - If you want to add this new React Native code to an existing application, check out the [Integration guide](https://reactnative.dev/docs/integration-with-existing-apps).
 - If you're curious to learn more about React Native, check out the [docs](https://reactnative.dev/docs/getting-started).
 
+# Frontend-Backend Architecture
+
+This React Native app integrates a Node.js server that runs directly on the mobile device using `nodejs-mobile-react-native`. Here's how the frontend communicates with the embedded Node.js server:
+
+## Node.js Mobile Server
+
+The Node.js server runs inside the mobile app and is located in `nodejs-assets/nodejs-project/`:
+
+- **`main.js`** - Initializes the server environment and configures storage paths for Android
+- **`main.cjs`** - Contains the actual Express server with SmythOS SDK integration
+- **Server Port**: `3000` (runs on the local device)
+
+## Frontend-Backend Communication
+
+The React Native frontend (`App.tsx`) communicates with the Node.js server via HTTP requests:
+
+### Message Endpoint
+- **URL**: `http://[LOCAL_PHONE_IP]:3000/message` (e.g., `http://192.168.100.26:3000/message`)
+- **Method**: `POST`
+- **Content-Type**: `application/json`
+- **Payload**: `{ message: "user input" }`
+- **Response**: `{ response: "AI response" }`
+
+### Communication Flow
+1. **Server Startup**: When the app launches, `nodejs.start('main.js')` initializes the Node.js server
+2. **User Input**: User types a message in the chat interface
+3. **API Call**: Frontend sends POST request to `/message` endpoint using the phone's local IP address
+4. **AI Processing**: Server processes the message using SmythOS SDK and Google AI
+5. **Response**: Server returns AI response in JSON format
+6. **UI Update**: Frontend displays the AI response in the chat interface
+
+### Key Features
+- **Local Processing**: All AI processing happens on-device via the embedded Node.js server
+- **IP-based Communication**: Frontend connects to the server using the phone's local network IP address
+- **Real-time Chat**: Interactive chat interface with loading states
+- **Error Handling**: Network errors are caught and displayed to the user
+- **Message History**: Chat messages are stored in component state
+
+## Configuration
+- The server URL in `App.tsx:60` uses your phone's local IP address for communication
+- Google AI API key is embedded in the server configuration
+- Storage directories are automatically created for Android app data
+- SmythOS SDK is configured to use the app's private storage directory
+
 # Troubleshooting
 
 If you're having issues getting the above steps to work, see the [Troubleshooting](https://reactnative.dev/docs/troubleshooting) page.
