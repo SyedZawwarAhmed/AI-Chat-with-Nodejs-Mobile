@@ -7,14 +7,19 @@
     "ios": "react-native run-ios",
     "lint": "eslint .",
     "start": "react-native start",
-    "test": "jest"
+    "test": "jest",
+    "postinstall": "patch-package"
   },
   "dependencies": {
     "@react-native/new-app-screen": "0.81.1",
     "nodejs-mobile-react-native": "^18.20.4",
+    "patch-package": "^8.0.1",
     "react": "19.1.0",
     "react-native": "0.81.1",
-    "react-native-safe-area-context": "^5.5.2"
+    "react-native-fetch-api": "^3.0.0",
+    "react-native-polyfill-globals": "^3.1.0",
+    "react-native-safe-area-context": "^5.5.2",
+    "web-streams-polyfill": "^4.2.0"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",

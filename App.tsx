@@ -1,15 +1,6 @@
-/**
- * Sample React Native App
- * https://github.com/facebook/react-native
- *
- * @format
- */
-
 import nodejs from 'nodejs-mobile-react-native';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -36,14 +27,14 @@ interface ChatMessage {
 function App() {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [inputText, setInputText] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
+  const scrollViewRef = useRef<ScrollView>(null);
 
   useEffect(() => {
     nodejs.start('main.js');
   }, []);
 
   const sendMessage = async () => {
-    if (!inputText.trim() || isLoading) return;
+    if (!inputText.trim()) return;
 
     const userMessage: ChatMessage = {
       id: Date.now().toString(),
@@ -54,32 +45,70 @@ function App() {
 
     setChatMessages(prev => [...prev, userMessage]);
     setInputText('');
-    setIsLoading(true);
+
+    const aiMessageId = (Date.now() + 1).toString();
+
+    // Add empty AI message immediately
+    setChatMessages(prev => [
+      ...prev,
+      { id: aiMessageId, text: '', isUser: false, timestamp: Date.now() },
+    ]);
 
     try {
-      const response = await fetch('http://192.168.100.26:3000/message', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
+      const response = await fetch(
+        'http://192.168.100.26:3000/message/stream',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: userMessage.text }),
+          reactNative: { textStreaming: true },
         },
-        body: JSON.stringify({ message: inputText }),
-      });
+      );
 
-      const data = await response.json();
+      if (!response.body) {
+        throw new Error('Streaming not supported — response.body is undefined');
+      }
 
-      const aiMessage: ChatMessage = {
-        id: (Date.now() + 1).toString(),
-        text: data.response,
-        isUser: false,
-        timestamp: Date.now(),
-      };
+      const reader = response.body.getReader();
+      let aiText = '';
+      let leftover = '';
 
-      setChatMessages(prev => [...prev, aiMessage]);
-    } catch (error) {
-      Alert.alert('Error', 'Failed to send message. Please try again.');
-      console.error('Error sending message:', error);
-    } finally {
-      setIsLoading(false);
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        // Convert chunk to string
+        const chunk = String.fromCharCode(...value);
+        const text = leftover + chunk;
+
+        const lines = text.split('\n');
+        leftover = lines.pop() || '';
+
+        for (let line of lines) {
+          if (!line.startsWith('data:')) continue;
+
+          try {
+            const parsed = JSON.parse(line.replace('data:', '').trim());
+
+            if (parsed.chunk) {
+              aiText += parsed.chunk;
+
+              setChatMessages(prev =>
+                prev.map(m =>
+                  m.id === aiMessageId ? { ...m, text: aiText } : m,
+                ),
+              );
+
+              // Auto-scroll to bottom as AI types
+              scrollViewRef.current?.scrollToEnd({ animated: true });
+            }
+          } catch (e) {
+            console.log('JSON parse error:', e);
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Streaming error:', err);
     }
   };
 
@@ -88,12 +117,12 @@ function App() {
   return (
     <SafeAreaProvider>
       <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
-      <AppContent 
-        chatMessages={chatMessages} 
+      <AppContent
+        chatMessages={chatMessages}
         inputText={inputText}
         setInputText={setInputText}
         sendMessage={sendMessage}
-        isLoading={isLoading}
+        scrollViewRef={scrollViewRef}
       />
     </SafeAreaProvider>
   );
@@ -104,47 +133,65 @@ interface AppContentProps {
   inputText: string;
   setInputText: (text: string) => void;
   sendMessage: () => void;
-  isLoading: boolean;
+  scrollViewRef: React.RefObject<ScrollView>;
 }
 
-function AppContent({ chatMessages, inputText, setInputText, sendMessage, isLoading }: AppContentProps) {
+function AppContent({
+  chatMessages,
+  inputText,
+  setInputText,
+  sendMessage,
+  scrollViewRef,
+}: AppContentProps) {
   const safeAreaInsets = useSafeAreaInsets();
 
   return (
-    <KeyboardAvoidingView 
+    <KeyboardAvoidingView
       style={[styles.container, { paddingTop: safeAreaInsets.top }]}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       keyboardVerticalOffset={Platform.OS === 'ios' ? safeAreaInsets.top : 0}
     >
       <Text style={styles.title}>AI Chat</Text>
 
-      <ScrollView style={styles.chatContainer} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        ref={scrollViewRef}
+        contentContainerStyle={styles.chatContainer}
+        showsVerticalScrollIndicator={false}
+      >
         {chatMessages.length === 0 ? (
-          <Text style={styles.emptyMessage}>Start a conversation with the AI!</Text>
+          <Text style={styles.emptyMessage}>
+            Start a conversation with the AI!
+          </Text>
         ) : (
-          chatMessages.map((message) => (
-            <View key={message.id} style={[
-              styles.messageContainer,
-              message.isUser ? styles.userMessage : styles.aiMessage
-            ]}>
-              <Text style={[
-                styles.messageText,
-                message.isUser ? styles.userMessageText : styles.aiMessageText
-              ]}>
+          chatMessages.map(message => (
+            <View
+              key={message.id}
+              style={[
+                styles.messageContainer,
+                message.isUser ? styles.userMessage : styles.aiMessage,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.messageText,
+                  message.isUser
+                    ? styles.userMessageText
+                    : styles.aiMessageText,
+                ]}
+              >
                 {message.text}
               </Text>
             </View>
           ))
         )}
-        {isLoading && (
-          <View style={[styles.messageContainer, styles.aiMessage]}>
-            <ActivityIndicator size="small" color="#007AFF" />
-            <Text style={styles.loadingText}>AI is thinking...</Text>
-          </View>
-        )}
       </ScrollView>
 
-      <View style={[styles.inputContainer, { paddingBottom: safeAreaInsets.bottom }]}>
+      <View
+        style={[
+          styles.inputContainer,
+          { paddingBottom: safeAreaInsets.bottom },
+        ]}
+      >
         <TextInput
           style={styles.textInput}
           value={inputText}
@@ -152,14 +199,21 @@ function AppContent({ chatMessages, inputText, setInputText, sendMessage, isLoad
           placeholder="Type your message..."
           multiline
           maxLength={500}
-          editable={!isLoading}
         />
-        <TouchableOpacity 
-          style={[styles.sendButton, (!inputText.trim() || isLoading) && styles.sendButtonDisabled]}
+        <TouchableOpacity
+          style={[
+            styles.sendButton,
+            !inputText.trim() && styles.sendButtonDisabled,
+          ]}
           onPress={sendMessage}
-          disabled={!inputText.trim() || isLoading}
+          disabled={!inputText.trim()}
         >
-          <Text style={[styles.sendButtonText, (!inputText.trim() || isLoading) && styles.sendButtonTextDisabled]}>
+          <Text
+            style={[
+              styles.sendButtonText,
+              !inputText.trim() && styles.sendButtonTextDisabled,
+            ]}
+          >
             Send
           </Text>
         </TouchableOpacity>
@@ -169,10 +223,7 @@ function AppContent({ chatMessages, inputText, setInputText, sendMessage, isLoad
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f8f9fa',
-  },
+  container: { flex: 1, backgroundColor: '#f8f9fa' },
   title: {
     fontSize: 24,
     fontWeight: 'bold',
@@ -184,7 +235,7 @@ const styles = StyleSheet.create({
     borderBottomColor: '#e1e5e9',
   },
   chatContainer: {
-    flex: 1,
+    flexGrow: 1,
     padding: 16,
   },
   emptyMessage: {
@@ -194,10 +245,7 @@ const styles = StyleSheet.create({
     marginTop: 50,
     fontStyle: 'italic',
   },
-  messageContainer: {
-    marginVertical: 4,
-    maxWidth: '80%',
-  },
+  messageContainer: { marginVertical: 4, maxWidth: '80%' },
   userMessage: {
     alignSelf: 'flex-end',
     backgroundColor: '#007AFF',
@@ -214,22 +262,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#e1e5e9',
   },
-  messageText: {
-    fontSize: 16,
-    lineHeight: 20,
-  },
-  userMessageText: {
-    color: '#ffffff',
-  },
-  aiMessageText: {
-    color: '#1a1a1a',
-  },
-  loadingText: {
-    color: '#007AFF',
-    fontSize: 14,
-    marginLeft: 8,
-    fontStyle: 'italic',
-  },
+  messageText: { fontSize: 16, lineHeight: 20 },
+  userMessageText: { color: '#ffffff' },
+  aiMessageText: { color: '#1a1a1a' },
   inputContainer: {
     flexDirection: 'row',
     padding: 16,
@@ -258,17 +293,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  sendButtonDisabled: {
-    backgroundColor: '#c6c6c8',
-  },
-  sendButtonText: {
-    color: '#ffffff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  sendButtonTextDisabled: {
-    color: '#8e8e93',
-  },
+  sendButtonDisabled: { backgroundColor: '#c6c6c8' },
+  sendButtonText: { color: '#ffffff', fontSize: 16, fontWeight: '600' },
+  sendButtonTextDisabled: { color: '#8e8e93' },
 });
 
 export default App;
