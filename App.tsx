@@ -1,6 +1,8 @@
 import nodejs from 'nodejs-mobile-react-native';
 import { useEffect, useState, useRef } from 'react';
+import { pick, types } from '@react-native-documents/picker';
 import {
+  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -8,6 +10,7 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  ToastAndroid,
   TouchableOpacity,
   useColorScheme,
   View,
@@ -50,8 +53,9 @@ function App() {
     const aiMessageId = (Date.now() + 1).toString();
 
     try {
-      const response = await fetch(
-        'http://192.168.100.26:3000/message/stream',
+      // @ts-ignore
+      const response = await global.streamingFetch(
+        'http://localhost:3000/message/stream',
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -78,7 +82,10 @@ function App() {
 
         // Convert chunk to string
         const chunk = String.fromCharCode(...value);
+
         console.log('chunk', chunk);
+        if (chunk?.startsWith('{"error":'))
+          Alert.alert(JSON.parse(chunk).error);
         const text = leftover + chunk;
 
         const lines = text.split('\n');
@@ -132,6 +139,54 @@ function App() {
     }
   };
 
+  const pickAndUploadAgent = async () => {
+    try {
+      const result = await pick({
+        type: [types.allFiles],
+      });
+
+      const res = result[0];
+      console.log('File picked:', res);
+
+      const formData = new FormData();
+      formData.append('agentFile', {
+        uri: res.uri,
+        type: res.type || 'application/octet-stream',
+        name: res.name || 'agent.smyth',
+      } as any);
+
+      const response = await fetch('http://localhost:3000/upload-agent', {
+        method: 'POST',
+        body: formData as any,
+      });
+
+      const json = (await response.json()) as {
+        success: boolean;
+        error?: string;
+      };
+      if (json.success) {
+        Alert.alert('Success', 'Agent uploaded and initialized successfully!');
+        setChatMessages(prev => [
+          ...prev,
+          {
+            id: Date.now().toString(),
+            text: 'System: New agent loaded.',
+            isUser: false,
+            timestamp: Date.now(),
+          },
+        ]);
+      } else {
+        Alert.alert('Error', json.error || 'Failed to upload agent');
+      }
+    } catch (err) {
+      // Check for cancellation if possible, otherwise just log
+      console.log('File picker error or cancelled:', err);
+      if (!(err as any).message?.includes('canceled')) {
+        Alert.alert('Error', 'Failed to pick file');
+      }
+    }
+  };
+
   const isDarkMode = useColorScheme() === 'dark';
 
   return (
@@ -144,6 +199,7 @@ function App() {
         sendMessage={sendMessage}
         scrollViewRef={scrollViewRef}
         currentToolCall={currentToolCall}
+        onUploadPress={pickAndUploadAgent}
       />
     </SafeAreaProvider>
   );
@@ -154,8 +210,9 @@ interface AppContentProps {
   inputText: string;
   setInputText: (text: string) => void;
   sendMessage: () => void;
-  scrollViewRef: React.RefObject<ScrollView>;
+  scrollViewRef: React.RefObject<ScrollView | null>;
   currentToolCall: string | null;
+  onUploadPress: () => void;
 }
 
 function AppContent({
@@ -165,6 +222,7 @@ function AppContent({
   sendMessage,
   scrollViewRef,
   currentToolCall,
+  onUploadPress,
 }: AppContentProps) {
   const safeAreaInsets = useSafeAreaInsets();
 
@@ -174,7 +232,12 @@ function AppContent({
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       keyboardVerticalOffset={Platform.OS === 'ios' ? safeAreaInsets.top : 0}
     >
-      <Text style={styles.title}>SmythOS Chat</Text>
+      <View style={styles.header}>
+        <Text style={styles.title}>SmythOS Chat</Text>
+        <TouchableOpacity onPress={onUploadPress} style={styles.uploadButton}>
+          <Text style={styles.uploadButtonText}>Upload Agent</Text>
+        </TouchableOpacity>
+      </View>
 
       <ScrollView
         ref={scrollViewRef}
@@ -254,15 +317,31 @@ function AppContent({
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f8f9fa' },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    textAlign: 'center',
-    paddingVertical: 16,
-    color: '#1a1a1a',
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
     backgroundColor: '#ffffff',
     borderBottomWidth: 1,
     borderBottomColor: '#e1e5e9',
+  },
+  title: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#1a1a1a',
+  },
+  uploadButton: {
+    backgroundColor: '#e9ecef',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  uploadButtonText: {
+    fontSize: 14,
+    color: '#007AFF',
+    fontWeight: '600',
   },
   chatContainer: {
     flexGrow: 1,
@@ -293,7 +372,7 @@ const styles = StyleSheet.create({
     borderColor: '#e1e5e9',
   },
   messageText: { fontSize: 16, lineHeight: 20 },
-  // userMessageText: { color: '#ffffff' },
+  userMessageText: { color: '#ffffff' },
   aiMessageText: { color: '#1a1a1a' },
   inputContainer: {
     flexDirection: 'row',

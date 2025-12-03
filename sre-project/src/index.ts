@@ -1,6 +1,10 @@
 import express from 'express';
-import { Agent, TLLMEvent } from '@smythos/sdk';
+import { Agent, Model, TLLMEvent } from '@smythos/sdk';
 import cors from 'cors';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import multer from 'multer';
+import fs from 'fs';
 
 const app = express();
 const PORT = +process.env.PORT || 3000;
@@ -8,24 +12,63 @@ const PORT = +process.env.PORT || 3000;
 app.use(express.json());
 app.use(cors());
 
-// Agent
-const agent = new Agent({
-    id: 'crypto-market-assistant',
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+console.log('__dirname', __dirname);
 
-    name: 'CryptoMarket Assistant',
-    behavior: 'You are a crypto price tracker. You are given a coin id and you need to get the price of the coin in USD',
-    model: 'gpt-4o',
+const agentsDataDir = path.resolve(__dirname, '../agents-data');
+if (!fs.existsSync(agentsDataDir)) {
+    fs.mkdirSync(agentsDataDir, { recursive: true });
+}
+
+// Configure multer for file uploads
+const storage = multer.diskStorage({
+    destination: function (req, file, cb) {
+        cb(null, agentsDataDir);
+    },
+    filename: function (req, file, cb) {
+        cb(null, file.originalname);
+    },
 });
 
-agent.addSkill({
-    name: 'MarketData',
-    description: 'Use this skill to get comprehensive market data and statistics for a cryptocurrency',
-    process: async ({ coin_id }) => {
-        const url = `https://api.coingecko.com/api/v3/coins/${coin_id}?localization=false&tickers=false&market_data=true&community_data=false&developer_data=false&sparkline=false`;
-        const response = await fetch(url);
-        const data = await response.json();
-        return data.market_data;
-    },
+const upload = multer({ storage: storage });
+
+let agentPath = path.resolve(agentsDataDir, 'crypto-info-agent.smyth');
+let agent: Agent | null = null;
+
+// Initialize agent if file exists
+if (fs.existsSync(agentPath)) {
+    try {
+        agent = Agent.import(agentPath, {
+            model: Model.OpenAI('gpt-4o', { temperature: 1.0 }),
+        });
+        console.log('Agent initialized from:', agentPath);
+    } catch (error) {
+        console.error('Failed to initialize agent:', error);
+    }
+}
+
+// Upload endpoint
+app.post('/upload-agent', upload.single('agentFile'), async (req, res) => {
+    if (!req.file) {
+        return res.status(400).json({ error: 'No file uploaded' });
+    }
+
+    try {
+        const newAgentPath = req.file.path;
+        console.log('New agent uploaded to:', newAgentPath);
+
+        // Re-initialize agent
+        agent = Agent.import(newAgentPath, {
+            model: Model.OpenAI('gpt-4o', { temperature: 1.0 }),
+        });
+
+        agentPath = newAgentPath; // Update current path
+
+        res.json({ success: true, message: 'Agent uploaded and initialized successfully' });
+    } catch (error) {
+        console.error('Error initializing agent:', error);
+        res.status(500).json({ error: 'Failed to initialize agent from uploaded file' });
+    }
 });
 
 // SSE STREAMING ENDPOINT
@@ -34,6 +77,10 @@ app.post('/message/stream', async (req, res) => {
 
     if (!message) {
         return res.status(400).json({ error: 'Message is required' });
+    }
+
+    if (!agent) {
+        return res.status(503).json({ error: 'Agent not initialized. Please upload a .smyth file first.' });
     }
 
     // SSE headers
