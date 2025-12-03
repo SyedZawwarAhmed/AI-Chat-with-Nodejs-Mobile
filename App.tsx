@@ -27,6 +27,7 @@ interface ChatMessage {
 function App() {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [inputText, setInputText] = useState('');
+  const [currentToolCall, setCurrentToolCall] = useState<string | null>(null);
   const scrollViewRef = useRef<ScrollView>(null);
 
   useEffect(() => {
@@ -48,12 +49,6 @@ function App() {
 
     const aiMessageId = (Date.now() + 1).toString();
 
-    // Add empty AI message immediately
-    setChatMessages(prev => [
-      ...prev,
-      { id: aiMessageId, text: '', isUser: false, timestamp: Date.now() },
-    ]);
-
     try {
       const response = await fetch(
         'http://192.168.100.26:3000/message/stream',
@@ -72,13 +67,18 @@ function App() {
       const reader = response.body.getReader();
       let aiText = '';
       let leftover = '';
+      let aiMessageStarted = false;
 
       while (true) {
         const { value, done } = await reader.read();
-        if (done) break;
+        if (done) {
+          setCurrentToolCall(null);
+          break;
+        }
 
         // Convert chunk to string
         const chunk = String.fromCharCode(...value);
+        console.log('chunk', chunk);
         const text = leftover + chunk;
 
         const lines = text.split('\n');
@@ -91,16 +91,35 @@ function App() {
             const parsed = JSON.parse(line.replace('data:', '').trim());
 
             if (parsed.chunk) {
+              setCurrentToolCall(null);
               aiText += parsed.chunk;
 
-              setChatMessages(prev =>
-                prev.map(m =>
-                  m.id === aiMessageId ? { ...m, text: aiText } : m,
-                ),
-              );
+              if (!aiMessageStarted) {
+                setChatMessages(prev => [
+                  ...prev,
+                  {
+                    id: aiMessageId,
+                    text: aiText,
+                    isUser: false,
+                    timestamp: Date.now(),
+                  },
+                ]);
+                aiMessageStarted = true;
+              } else {
+                setChatMessages(prev =>
+                  prev.map(m =>
+                    m.id === aiMessageId ? { ...m, text: aiText } : m,
+                  ),
+                );
+              }
 
               // Auto-scroll to bottom as AI types
               scrollViewRef.current?.scrollToEnd({ animated: true });
+            } else if (parsed.toolCall) {
+              setCurrentToolCall(parsed.toolCall.tool.name);
+              scrollViewRef.current?.scrollToEnd({ animated: true });
+            } else if (parsed.done) {
+              setCurrentToolCall(null);
             }
           } catch (e) {
             console.log('JSON parse error:', e);
@@ -109,6 +128,7 @@ function App() {
       }
     } catch (err) {
       console.error('Streaming error:', err);
+      setCurrentToolCall(null);
     }
   };
 
@@ -123,6 +143,7 @@ function App() {
         setInputText={setInputText}
         sendMessage={sendMessage}
         scrollViewRef={scrollViewRef}
+        currentToolCall={currentToolCall}
       />
     </SafeAreaProvider>
   );
@@ -134,6 +155,7 @@ interface AppContentProps {
   setInputText: (text: string) => void;
   sendMessage: () => void;
   scrollViewRef: React.RefObject<ScrollView>;
+  currentToolCall: string | null;
 }
 
 function AppContent({
@@ -142,6 +164,7 @@ function AppContent({
   setInputText,
   sendMessage,
   scrollViewRef,
+  currentToolCall,
 }: AppContentProps) {
   const safeAreaInsets = useSafeAreaInsets();
 
@@ -151,7 +174,7 @@ function AppContent({
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       keyboardVerticalOffset={Platform.OS === 'ios' ? safeAreaInsets.top : 0}
     >
-      <Text style={styles.title}>AI Chat</Text>
+      <Text style={styles.title}>SmythOS Chat</Text>
 
       <ScrollView
         ref={scrollViewRef}
@@ -183,6 +206,13 @@ function AppContent({
               </Text>
             </View>
           ))
+        )}
+        {currentToolCall && (
+          <View style={[styles.messageContainer, styles.toolCallMessage]}>
+            <Text style={[styles.messageText, styles.toolCallText]}>
+              Calling skill: {currentToolCall}...
+            </Text>
+          </View>
         )}
       </ScrollView>
 
@@ -248,7 +278,7 @@ const styles = StyleSheet.create({
   messageContainer: { marginVertical: 4, maxWidth: '80%' },
   userMessage: {
     alignSelf: 'flex-end',
-    backgroundColor: '#007AFF',
+    backgroundColor: '#44c9a9',
     borderRadius: 18,
     paddingHorizontal: 16,
     paddingVertical: 10,
@@ -263,7 +293,7 @@ const styles = StyleSheet.create({
     borderColor: '#e1e5e9',
   },
   messageText: { fontSize: 16, lineHeight: 20 },
-  userMessageText: { color: '#ffffff' },
+  // userMessageText: { color: '#ffffff' },
   aiMessageText: { color: '#1a1a1a' },
   inputContainer: {
     flexDirection: 'row',
@@ -296,6 +326,16 @@ const styles = StyleSheet.create({
   sendButtonDisabled: { backgroundColor: '#c6c6c8' },
   sendButtonText: { color: '#ffffff', fontSize: 16, fontWeight: '600' },
   sendButtonTextDisabled: { color: '#8e8e93' },
+  toolCallMessage: {
+    // backgroundColor: '#fff3cd',
+    // borderColor: '#ffeeba',
+    // borderStyle: 'dashed',
+  },
+  toolCallText: {
+    color: '#856404',
+    fontStyle: 'italic',
+    fontSize: 14,
+  },
 });
 
 export default App;
