@@ -163,14 +163,16 @@ function App() {
       const json = (await response.json()) as {
         success: boolean;
         error?: string;
+        message?: string;
       };
       if (json.success) {
-        Alert.alert('Success', 'Agent uploaded and initialized successfully!');
+        // Use the server's message which accurately reflects what happened
+        Alert.alert('Success', json.message || 'Agent uploaded successfully!');
         setChatMessages(prev => [
           ...prev,
           {
             id: Date.now().toString(),
-            text: 'System: New agent loaded.',
+            text: `System: ${json.message || 'Agent file uploaded.'}`,
             isUser: false,
             timestamp: Date.now(),
           },
@@ -187,6 +189,62 @@ function App() {
     }
   };
 
+  const pickAndUploadVault = async () => {
+    try {
+      const result = await pick({
+        type: [types.allFiles],
+      });
+
+      const res = result[0];
+      console.log('Vault file picked:', res);
+
+      // Read the file content
+      const fileContent = await fetch(res.uri).then(r => r.text());
+
+      // Parse and validate JSON
+      let vaultData;
+      try {
+        vaultData = JSON.parse(fileContent);
+      } catch (parseErr) {
+        Alert.alert('Error', 'Invalid JSON file');
+        return;
+      }
+
+      // Upload vault data as JSON
+      const response = await fetch('http://localhost:3000/upload-vault', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(vaultData),
+      });
+
+      const json = (await response.json()) as {
+        success: boolean;
+        error?: string;
+        message?: string;
+      };
+
+      if (json.success) {
+        Alert.alert('Success', json.message || 'Vault file uploaded successfully!');
+        setChatMessages(prev => [
+          ...prev,
+          {
+            id: Date.now().toString(),
+            text: `System: ${json.message || 'Vault file uploaded.'}`,
+            isUser: false,
+            timestamp: Date.now(),
+          },
+        ]);
+      } else {
+        Alert.alert('Error', json.error || 'Failed to upload vault file');
+      }
+    } catch (err) {
+      console.log('Vault file picker error or cancelled:', err);
+      if (!(err as any).message?.includes('canceled')) {
+        Alert.alert('Error', 'Failed to pick or upload vault file');
+      }
+    }
+  };
+
   const isDarkMode = useColorScheme() === 'dark';
 
   return (
@@ -199,7 +257,8 @@ function App() {
         sendMessage={sendMessage}
         scrollViewRef={scrollViewRef}
         currentToolCall={currentToolCall}
-        onUploadPress={pickAndUploadAgent}
+        onUploadAgentPress={pickAndUploadAgent}
+        onUploadVaultPress={pickAndUploadVault}
       />
     </SafeAreaProvider>
   );
@@ -212,7 +271,8 @@ interface AppContentProps {
   sendMessage: () => void;
   scrollViewRef: React.RefObject<ScrollView | null>;
   currentToolCall: string | null;
-  onUploadPress: () => void;
+  onUploadAgentPress: () => void;
+  onUploadVaultPress: () => void;
 }
 
 function AppContent({
@@ -222,7 +282,8 @@ function AppContent({
   sendMessage,
   scrollViewRef,
   currentToolCall,
-  onUploadPress,
+  onUploadAgentPress,
+  onUploadVaultPress,
 }: AppContentProps) {
   const safeAreaInsets = useSafeAreaInsets();
 
@@ -234,9 +295,14 @@ function AppContent({
     >
       <View style={styles.header}>
         <Text style={styles.title}>SmythOS Chat</Text>
-        <TouchableOpacity onPress={onUploadPress} style={styles.uploadButton}>
-          <Text style={styles.uploadButtonText}>Upload Agent</Text>
-        </TouchableOpacity>
+        <View style={styles.headerButtons}>
+          <TouchableOpacity onPress={onUploadVaultPress} style={styles.uploadButton}>
+            <Text style={styles.uploadButtonText}>Upload Vault</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={onUploadAgentPress} style={styles.uploadButton}>
+            <Text style={styles.uploadButtonText}>Upload Agent</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       <ScrollView
@@ -331,6 +397,10 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: 'bold',
     color: '#1a1a1a',
+  },
+  headerButtons: {
+    flexDirection: 'row',
+    gap: 8,
   },
   uploadButton: {
     backgroundColor: '#e9ecef',
