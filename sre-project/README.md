@@ -1,6 +1,6 @@
-# @smythos/sdk Minimal Code Agent Example
+# @SmythOS/sdk Minimal Code Agent Example
 
-This project is a simple demonstration of the core capabilities of the [@smythos/sdk](https://www.npmjs.com/package/@smythos/sdk), showcasing how to build and interact with a basic AI agent in a Node.js environment. It features a "Storyteller" agent that runs directly and demonstrates several interaction patterns.
+This project is a simple demonstration of the core capabilities of the [@SmythOS/sdk](https://www.npmjs.com/package/@SmythOS/sdk), showcasing how to build and interact with a basic AI agent in a Node.js environment. It features a "Storyteller" agent that runs directly and demonstrates several interaction patterns.
 
 The project also demonstrates how to build a SEA executable for Windows, Linux, and macOS.
 
@@ -28,7 +28,7 @@ The example is designed to run from top to bottom, logging the output of each in
 1.  Clone the repository:
 
     ```bash
-    git clone --branch code-agent-minimal-exe-bundle https://github.com/smythos/sre-project-templates.git simple-agent-example
+    git clone --branch code-agent-minimal-exe-bundle https://github.com/SmythOS/sre-project-templates.git simple-agent-example
     cd simple-agent-example
     ```
 
@@ -40,7 +40,7 @@ The example is designed to run from top to bottom, logging the output of each in
 
 3.  Set up your OpenAI API key:
 
-    The application uses the [@smythos/sdk](https://www.npmjs.com/package/@smythos/sdk) which has a built-in secret management system called Smyth Vault.
+    The application uses the [@SmythOS/sdk](https://www.npmjs.com/package/@SmythOS/sdk) which has a built-in secret management system called Smyth Vault.
     During development, we can use a simple json file to store vault secrets.
 
     Create a file in one of the following locations:

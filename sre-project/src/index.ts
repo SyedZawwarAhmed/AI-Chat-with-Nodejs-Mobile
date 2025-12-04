@@ -1,5 +1,5 @@
 import express from 'express';
-import { Agent, Model, TLLMEvent } from '@smythos/sdk';
+import { Agent, Model, TLLMEvent } from '@SmythOS/sdk';
 import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';

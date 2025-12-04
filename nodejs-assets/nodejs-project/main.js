@@ -2,7 +2,7 @@
 // const fs = require('fs');
 //
 // // Set up proper storage path for Android before requiring SmythOS SDK
-// const androidAppDir = '/data/data/com.nodejsinmobile/files';
+// const androidAppDir = '/data/data/com.SmythOS/files';
 // const smythStorageDir = path.join(androidAppDir, '.smyth', 'storage', 'local');
 //
 // // Create storage directories if they don't exist

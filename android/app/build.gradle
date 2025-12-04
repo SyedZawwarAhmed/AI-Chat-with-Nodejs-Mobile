@@ -77,16 +77,13 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
-    namespace "com.nodejsinmobile"
+    namespace "com.SmythOS"
     defaultConfig {
-        applicationId "com.nodejsinmobile"
+        applicationId "com.SmythOS"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
         versionName "1.0"
-        ndk {
-            abiFilters "armeabi-v7a", "arm64-v8a", "x86_64"
-        }
     }
     signingConfigs {
         debug {
@@ -96,6 +93,15 @@ android {
             keyPassword 'android'
         }
     }
+    splits {
+        abi {
+            reset()
+            enable true
+            universalApk false  // Set to true if you want a universal APK in addition to per-architecture APKs
+            include "armeabi-v7a", "arm64-v8a", "x86_64"
+        }
+    }
+    
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
@@ -104,8 +110,23 @@ android {
             // Caution! In production, you need to generate your own keystore file.
             // see https://reactnative.dev/docs/signed-apk-android.
             signingConfig signingConfigs.debug
+            debuggable true  // TODO: Remove this for production builds
             minifyEnabled enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
+        }
+    }
+    
+    // Map for the version code that gives each ABI a value
+    def abiCodes = ["armeabi-v7a": 1, "arm64-v8a": 2, "x86_64": 3]
+    
+    applicationVariants.all { variant ->
+        variant.outputs.each { output ->
+            // For each separate APK per architecture, set a unique version code as described here:
+            // https://developer.android.com/studio/build/configure-apk-splits.html
+            def abiName = output.getFilter(com.android.build.OutputFile.ABI)
+            if (abiName != null) {
+                output.versionCodeOverride = (defaultConfig.versionCode * 1000) + abiCodes.get(abiName, 0)
+            }
         }
     }
 }
