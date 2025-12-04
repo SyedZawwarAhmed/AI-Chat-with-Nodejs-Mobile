@@ -31,6 +31,7 @@ function App() {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [inputText, setInputText] = useState('');
   const [currentToolCall, setCurrentToolCall] = useState<string | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
   const scrollViewRef = useRef<ScrollView>(null);
 
   useEffect(() => {
@@ -51,6 +52,7 @@ function App() {
     setInputText('');
 
     const aiMessageId = (Date.now() + 1).toString();
+    let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
 
     try {
       // @ts-ignore
@@ -64,11 +66,23 @@ function App() {
         },
       );
 
+      // Check for error status before attempting to read stream
+      if (!response.ok) {
+        // Don't try to read response.text() as it may use TextDecoder
+        const statusMessage =
+          response.status === 503
+            ? 'Agent not initialized. Please upload both a vault.json file and a .smyth agent file through the app.'
+            : `Server error (${response.status})`;
+
+        Alert.alert('Error', statusMessage);
+        return;
+      }
+
       if (!response.body) {
         throw new Error('Streaming not supported — response.body is undefined');
       }
 
-      const reader = response.body.getReader();
+      reader = response.body.getReader();
       let aiText = '';
       let leftover = '';
       let aiMessageStarted = false;
@@ -84,8 +98,23 @@ function App() {
         const chunk = String.fromCharCode(...value);
 
         console.log('chunk', chunk);
-        if (chunk?.startsWith('{"error":'))
-          Alert.alert(JSON.parse(chunk).error);
+
+        // Check for error in SSE data
+        if (chunk?.startsWith('{"error":')) {
+          try {
+            const errorData = JSON.parse(chunk);
+            Alert.alert('Error', errorData.error);
+            // Close the reader and exit
+            if (reader) {
+              reader.cancel();
+            }
+            setCurrentToolCall(null);
+            return;
+          } catch (e) {
+            console.error('Error parsing error chunk:', e);
+          }
+        }
+
         const text = leftover + chunk;
 
         const lines = text.split('\n');
@@ -127,6 +156,14 @@ function App() {
               scrollViewRef.current?.scrollToEnd({ animated: true });
             } else if (parsed.done) {
               setCurrentToolCall(null);
+            } else if (parsed.error) {
+              // Handle error in SSE stream
+              Alert.alert('Error', parsed.error);
+              if (reader) {
+                reader.cancel();
+              }
+              setCurrentToolCall(null);
+              return;
             }
           } catch (e) {
             console.log('JSON parse error:', e);
@@ -136,35 +173,97 @@ function App() {
     } catch (err) {
       console.error('Streaming error:', err);
       setCurrentToolCall(null);
+
+      // Make sure to clean up the reader
+      if (reader) {
+        try {
+          await reader.cancel();
+        } catch (cancelErr) {
+          console.error('Error cancelling reader:', cancelErr);
+        }
+      }
     }
   };
 
   const pickAndUploadAgent = async () => {
+    if (isUploading) {
+      console.log('Upload already in progress, ignoring request');
+      return;
+    }
+
     try {
+      setIsUploading(true);
+
       const result = await pick({
         type: [types.allFiles],
       });
 
+      if (!result || result.length === 0) {
+        console.log('No file selected');
+        setIsUploading(false);
+        return;
+      }
+
       const res = result[0];
-      console.log('File picked:', res);
+      console.log('Agent file picked:', res);
 
-      const formData = new FormData();
-      formData.append('agentFile', {
-        uri: res.uri,
-        type: res.type || 'application/octet-stream',
-        name: res.name || 'agent.smyth',
-      } as any);
+      if (!res.uri) {
+        Alert.alert('Error', 'Invalid file selected. Please try again.');
+        setIsUploading(false);
+        return;
+      }
 
+      // Read the file content (same as vault upload)
+      console.log('Reading agent file content...');
+      const fileContent = await fetch(res.uri).then(r => r.text());
+
+      // Parse and validate JSON
+      let agentData;
+      try {
+        agentData = JSON.parse(fileContent);
+      } catch (parseErr) {
+        console.error('JSON parse error:', parseErr);
+        Alert.alert(
+          'Error',
+          'Invalid JSON file. Please check the file format.',
+        );
+        setIsUploading(false);
+        return;
+      }
+
+      // Upload agent data as JSON (same as vault upload)
+      console.log('Uploading agent file to server...');
       const response = await fetch('http://localhost:3000/upload-agent', {
         method: 'POST',
-        body: formData as any,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(agentData),
       });
 
-      const json = (await response.json()) as {
-        success: boolean;
-        error?: string;
-        message?: string;
-      };
+      if (!response.ok) {
+        // Don't use response.statusText as it may cause TextDecoder errors
+        const errorMsg =
+          response.status === 503
+            ? 'Server not ready. Please try again.'
+            : `Upload failed with status ${response.status}`;
+        Alert.alert('Error', errorMsg);
+        setIsUploading(false);
+        return;
+      }
+
+      let json;
+      try {
+        json = (await response.json()) as {
+          success: boolean;
+          error?: string;
+          message?: string;
+        };
+      } catch (parseErr) {
+        console.error('Failed to parse response:', parseErr);
+        Alert.alert('Error', 'Invalid server response');
+        setIsUploading(false);
+        return;
+      }
+
       if (json.success) {
         // Use the server's message which accurately reflects what happened
         Alert.alert('Success', json.message || 'Agent uploaded successfully!');
@@ -180,25 +279,72 @@ function App() {
       } else {
         Alert.alert('Error', json.error || 'Failed to upload agent');
       }
+
+      setIsUploading(false);
     } catch (err) {
-      // Check for cancellation if possible, otherwise just log
-      console.log('File picker error or cancelled:', err);
-      if (!(err as any).message?.includes('canceled')) {
-        Alert.alert('Error', 'Failed to pick file');
+      console.error('Agent upload error:', err);
+      setIsUploading(false);
+
+      // More specific error messages
+      const errorMessage = (err as any).message || '';
+
+      if (
+        errorMessage.includes('canceled') ||
+        errorMessage.includes('cancelled')
+      ) {
+        console.log('File picker cancelled by user');
+        return;
+      }
+
+      if (
+        errorMessage.includes('Network request failed') ||
+        errorMessage.includes('fetch')
+      ) {
+        Alert.alert(
+          'Error',
+          'Network error. Please check if the server is running.',
+        );
+      } else if (errorMessage.includes('Server returned')) {
+        Alert.alert('Error', `Upload failed: ${errorMessage}`);
+      } else {
+        Alert.alert(
+          'Error',
+          `Failed to upload agent: ${errorMessage || 'Unknown error'}`,
+        );
       }
     }
   };
 
   const pickAndUploadVault = async () => {
+    if (isUploading) {
+      console.log('Upload already in progress, ignoring request');
+      return;
+    }
+
     try {
+      setIsUploading(true);
+
       const result = await pick({
         type: [types.allFiles],
       });
 
+      if (!result || result.length === 0) {
+        console.log('No file selected');
+        setIsUploading(false);
+        return;
+      }
+
       const res = result[0];
       console.log('Vault file picked:', res);
 
+      if (!res.uri) {
+        Alert.alert('Error', 'Invalid file selected. Please try again.');
+        setIsUploading(false);
+        return;
+      }
+
       // Read the file content
+      console.log('Reading vault file content...');
       const fileContent = await fetch(res.uri).then(r => r.text());
 
       // Parse and validate JSON
@@ -206,25 +352,53 @@ function App() {
       try {
         vaultData = JSON.parse(fileContent);
       } catch (parseErr) {
-        Alert.alert('Error', 'Invalid JSON file');
+        console.error('JSON parse error:', parseErr);
+        Alert.alert(
+          'Error',
+          'Invalid JSON file. Please check the file format.',
+        );
+        setIsUploading(false);
         return;
       }
 
       // Upload vault data as JSON
+      console.log('Uploading vault file to server...');
       const response = await fetch('http://localhost:3000/upload-vault', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(vaultData),
       });
 
-      const json = (await response.json()) as {
-        success: boolean;
-        error?: string;
-        message?: string;
-      };
+      if (!response.ok) {
+        // Don't use response.statusText as it may cause TextDecoder errors
+        const errorMsg =
+          response.status === 503
+            ? 'Server not ready. Please try again.'
+            : `Upload failed with status ${response.status}`;
+        Alert.alert('Error', errorMsg);
+        setIsUploading(false);
+        return;
+      }
+
+      let json;
+      try {
+        json = (await response.json()) as {
+          success: boolean;
+          error?: string;
+          message?: string;
+        };
+      } catch (parseErr) {
+        console.error('Failed to parse response:', parseErr);
+        Alert.alert('Error', 'Invalid server response');
+        setIsUploading(false);
+        return;
+      }
 
       if (json.success) {
-        Alert.alert('Success', json.message || 'Vault file uploaded successfully!');
+        Alert.alert(
+          'Success',
+          json.message || 'Vault file uploaded successfully!',
+        );
         setChatMessages(prev => [
           ...prev,
           {
@@ -237,10 +411,38 @@ function App() {
       } else {
         Alert.alert('Error', json.error || 'Failed to upload vault file');
       }
+
+      setIsUploading(false);
     } catch (err) {
-      console.log('Vault file picker error or cancelled:', err);
-      if (!(err as any).message?.includes('canceled')) {
-        Alert.alert('Error', 'Failed to pick or upload vault file');
+      console.error('Vault upload error:', err);
+      setIsUploading(false);
+
+      // More specific error messages
+      const errorMessage = (err as any).message || '';
+
+      if (
+        errorMessage.includes('canceled') ||
+        errorMessage.includes('cancelled')
+      ) {
+        console.log('File picker cancelled by user');
+        return;
+      }
+
+      if (
+        errorMessage.includes('Network request failed') ||
+        errorMessage.includes('fetch')
+      ) {
+        Alert.alert(
+          'Error',
+          'Network error. Please check if the server is running.',
+        );
+      } else if (errorMessage.includes('Server returned')) {
+        Alert.alert('Error', `Upload failed: ${errorMessage}`);
+      } else {
+        Alert.alert(
+          'Error',
+          `Failed to upload vault: ${errorMessage || 'Unknown error'}`,
+        );
       }
     }
   };
@@ -296,10 +498,16 @@ function AppContent({
       <View style={styles.header}>
         <Text style={styles.title}>SmythOS Chat</Text>
         <View style={styles.headerButtons}>
-          <TouchableOpacity onPress={onUploadVaultPress} style={styles.uploadButton}>
+          <TouchableOpacity
+            onPress={onUploadVaultPress}
+            style={styles.uploadButton}
+          >
             <Text style={styles.uploadButtonText}>Upload Vault</Text>
           </TouchableOpacity>
-          <TouchableOpacity onPress={onUploadAgentPress} style={styles.uploadButton}>
+          <TouchableOpacity
+            onPress={onUploadAgentPress}
+            style={styles.uploadButton}
+          >
             <Text style={styles.uploadButtonText}>Upload Agent</Text>
           </TouchableOpacity>
         </View>
@@ -312,7 +520,7 @@ function AppContent({
       >
         {chatMessages.length === 0 ? (
           <Text style={styles.emptyMessage}>
-            Start a conversation with the AI!
+            Start a conversation with the Agent
           </Text>
         ) : (
           chatMessages.map(message => (
@@ -422,7 +630,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#6c757d',
     marginTop: 50,
-    fontStyle: 'italic',
   },
   messageContainer: { marginVertical: 4, maxWidth: '80%' },
   userMessage: {

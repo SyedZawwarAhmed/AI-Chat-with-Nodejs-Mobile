@@ -3,7 +3,6 @@ import { Agent, Model, TLLMEvent } from '@SmythOS/sdk';
 import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import multer from 'multer';
 import fs from 'fs';
 
 const app = express();
@@ -20,19 +19,9 @@ if (!fs.existsSync(agentsDataDir)) {
     fs.mkdirSync(agentsDataDir, { recursive: true });
 }
 
-// Configure multer for file uploads
-const storage = multer.diskStorage({
-    destination: function (req, file, cb) {
-        cb(null, agentsDataDir);
-    },
-    filename: function (req, file, cb) {
-        cb(null, file.originalname);
-    },
-});
 
-const upload = multer({ storage: storage });
 
-let agentPath = path.resolve(agentsDataDir, 'crypto-info-agent.smyth');
+let agentPath = path.resolve(agentsDataDir, 'agent.smyth');
 let agent: Agent | null = null;
 
 // Check if vault file exists
@@ -65,15 +54,21 @@ if (fs.existsSync(agentPath)) {
     console.log('⏸️  No agent file found. Please upload an agent through the app UI.');
 }
 
-// Upload endpoint
-app.post('/upload-agent', upload.single('agentFile'), async (req, res) => {
-    if (!req.file) {
-        return res.status(400).json({ error: 'No file uploaded' });
-    }
-
+// Agent file upload endpoint (JSON-based, same as vault)
+app.post('/upload-agent', express.json(), async (req, res) => {
     try {
-        const newAgentPath = req.file.path;
-        console.log('New agent uploaded to:', newAgentPath);
+        const agentData = req.body;
+
+        // Validate agent structure
+        if (!agentData || typeof agentData !== 'object') {
+            return res.status(400).json({ error: 'Invalid agent file format' });
+        }
+
+        // Write agent file to agents-data directory
+        const newAgentPath = path.resolve(agentsDataDir, 'agent.smyth');
+        fs.writeFileSync(newAgentPath, JSON.stringify(agentData, null, 2));
+
+        console.log('✅ Agent file saved to:', newAgentPath);
 
         // Check if vault file exists before initializing agent
         const vaultPath = path.resolve(__dirname, '../.smyth/vault.json');
@@ -89,18 +84,23 @@ app.post('/upload-agent', upload.single('agentFile'), async (req, res) => {
             });
         }
 
-        // Re-initialize agent with vault present
-        agent = Agent.import(newAgentPath, {
-            model: Model.OpenAI('gpt-4o', { temperature: 1.0 }),
-        });
+        // Initialize agent with vault present
+        try {
+            agent = Agent.import(newAgentPath, {
+                model: Model.OpenAI('gpt-4o', { temperature: 1.0 }),
+            });
 
-        agentPath = newAgentPath; // Update current path
+            agentPath = newAgentPath; // Update current path
 
-        console.log('✅ Agent uploaded and initialized successfully');
-        res.json({ success: true, message: 'Agent uploaded and initialized successfully' });
+            console.log('✅ Agent uploaded and initialized successfully');
+            res.json({ success: true, message: 'Agent uploaded and initialized successfully' });
+        } catch (error) {
+            console.error('⚠️  Agent uploaded but initialization failed:', error);
+            res.json({ success: true, message: 'Agent uploaded successfully, but initialization failed. Please check your agent file.' });
+        }
     } catch (error) {
-        console.error('❌ Error initializing agent:', error);
-        res.status(500).json({ error: 'Failed to initialize agent from uploaded file' });
+        console.error('❌ Error saving agent file:', error);
+        res.status(500).json({ error: 'Failed to save agent file' });
     }
 });
 
