@@ -35,6 +35,7 @@
     },
     "dependencies": {
         "@SmythOS/sdk": "^1.3.30",
+        "axios": "^1.13.2",
         "chalk": "^5.4.1",
         "pkce-challenge": "^5.0.0"
     }
