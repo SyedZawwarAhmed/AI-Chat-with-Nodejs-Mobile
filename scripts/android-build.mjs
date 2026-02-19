@@ -59,7 +59,18 @@ if (!envResult.ok) {
 
 printEnvSuccess(envResult);
 
-// ── Step 2: Build sre-project (rollup) ──────────────────────────────────
+// ── Step 2: Install nodejs-assets dependencies ─────────────────────────
+
+header('Installing Node.js Mobile runtime dependencies');
+
+const nodejsProjectDir = path.join(PROJECT_ROOT, 'nodejs-assets', 'nodejs-project');
+
+if (!fs.existsSync(path.join(nodejsProjectDir, 'node_modules'))) {
+    run('npm install', { cwd: nodejsProjectDir });
+}
+console.log(`${ANSI.green}✓${ANSI.reset} nodejs-assets/nodejs-project dependencies ready`);
+
+// ── Step 3: Build sre-project (rollup) ──────────────────────────────────
 
 header('Building sre-project (rollup)');
 
@@ -72,14 +83,14 @@ if (!fs.existsSync(path.join(sreProjectDir, 'node_modules'))) {
 
 run('npm run build:dev', { cwd: sreProjectDir });
 
-const builtBundle = path.join(PROJECT_ROOT, 'nodejs-assets', 'nodejs-project', 'dist', 'index.cjs');
+const builtBundle = path.join(nodejsProjectDir, 'dist', 'index.cjs');
 if (!fs.existsSync(builtBundle)) {
     console.error(`${ANSI.red}Expected build output not found at: ${builtBundle}${ANSI.reset}`);
     process.exit(1);
 }
 console.log(`${ANSI.green}✓${ANSI.reset} sre-project built successfully`);
 
-// ── Step 3: Build Android APK (Gradle) ──────────────────────────────────
+// ── Step 4: Build Android APK (Gradle) ──────────────────────────────────
 
 header('Building Android APK (Gradle)');
 
