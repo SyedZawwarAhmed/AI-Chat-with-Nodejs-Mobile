@@ -14,9 +14,6 @@ import os from 'os';
 import path from 'path';
 
 const REQUIRED_JDK_MAJOR = 17;
-const REQUIRED_BUILD_TOOLS = '36.0.0';
-const REQUIRED_PLATFORM = 'android-36';
-const REQUIRED_NDK = '27.1.12297006';
 
 const DOCS_URL = 'https://reactnative.dev/docs/set-up-your-environment';
 
@@ -135,7 +132,7 @@ function resolveAndroidHome(projectRoot) {
 }
 
 /**
- * Check whether a specific SDK component directory or binary exists.
+ * Check whether a specific SDK component file or directory exists.
  * @param {string} sdkPath
  * @param {string} relativePath
  * @returns {ComponentCheck}
@@ -143,6 +140,25 @@ function resolveAndroidHome(projectRoot) {
 function checkComponent(sdkPath, relativePath) {
     const full = path.join(sdkPath, relativePath);
     return { found: fs.existsSync(full), path: full };
+}
+
+/**
+ * Check whether a versioned SDK component directory has at least one
+ * installed version (e.g. build-tools/*, ndk/*, platforms/*).
+ * @param {string} sdkPath
+ * @param {string} componentDir  e.g. 'build-tools', 'ndk', 'platforms'
+ * @returns {ComponentCheck}
+ */
+function checkVersionedComponent(sdkPath, componentDir) {
+    const dir = path.join(sdkPath, componentDir);
+    if (!fs.existsSync(dir)) {
+        return { found: false, path: dir };
+    }
+    const entries = fs.readdirSync(dir).filter((e) => !e.startsWith('.'));
+    if (entries.length === 0) {
+        return { found: false, path: dir };
+    }
+    return { found: true, path: path.join(dir, entries[0]) };
 }
 
 /**
@@ -169,32 +185,33 @@ export function checkAndroidEnv(projectRoot) {
     }
 
     const sdkPath = androidHome.path || '';
+    const notFound = { found: false, path: undefined };
 
     const adbBin = process.platform === 'win32' ? 'adb.exe' : 'adb';
     const platformTools = androidHome.found
         ? checkComponent(sdkPath, path.join('platform-tools', adbBin))
-        : { found: false, path: undefined };
+        : notFound;
     if (!platformTools.found) missing.push('Android SDK Platform-Tools');
 
     const buildTools = androidHome.found
-        ? checkComponent(sdkPath, path.join('build-tools', REQUIRED_BUILD_TOOLS))
-        : { found: false, path: undefined };
-    if (!buildTools.found) missing.push(`Android SDK Build-Tools ${REQUIRED_BUILD_TOOLS}`);
+        ? checkVersionedComponent(sdkPath, 'build-tools')
+        : notFound;
+    if (!buildTools.found) missing.push('Android SDK Build-Tools');
 
     const platform = androidHome.found
-        ? checkComponent(sdkPath, path.join('platforms', REQUIRED_PLATFORM))
-        : { found: false, path: undefined };
-    if (!platform.found) missing.push(`Android SDK Platform ${REQUIRED_PLATFORM}`);
+        ? checkVersionedComponent(sdkPath, 'platforms')
+        : notFound;
+    if (!platform.found) missing.push('Android SDK Platform');
 
     const ndk = androidHome.found
-        ? checkComponent(sdkPath, path.join('ndk', REQUIRED_NDK))
-        : { found: false, path: undefined };
-    if (!ndk.found) missing.push(`Android NDK ${REQUIRED_NDK}`);
+        ? checkVersionedComponent(sdkPath, 'ndk')
+        : notFound;
+    if (!ndk.found) missing.push('Android NDK');
 
     const emulatorBin = process.platform === 'win32' ? 'emulator.exe' : 'emulator';
     const emulator = androidHome.found
         ? checkComponent(sdkPath, path.join('emulator', emulatorBin))
-        : { found: false, path: undefined };
+        : notFound;
     if (!emulator.found) missing.push('Android Emulator');
 
     return {
@@ -238,5 +255,5 @@ export function printEnvError(result) {
 export function printEnvSuccess(result) {
     console.log(`${ANSI.green}✓${ANSI.reset} JDK ${result.jdk.version} found`);
     console.log(`${ANSI.green}✓${ANSI.reset} Android SDK at ${result.androidHome.path}`);
-    console.log(`${ANSI.green}✓${ANSI.reset} Platform-Tools, Build-Tools ${REQUIRED_BUILD_TOOLS}, Platform ${REQUIRED_PLATFORM}, NDK ${REQUIRED_NDK}, Emulator`);
+    console.log(`${ANSI.green}✓${ANSI.reset} Platform-Tools, Build-Tools, Platform, NDK, Emulator`);
 }
